@@ -29,6 +29,14 @@ const INSTALL_DIR = path.join(LOCAL_DIR, "installed");
 const E2E_DIR = path.join(LOCAL_DIR, "e2e");
 
 const DEFAULT_KEY = path.join(os.homedir(), ".tauri", "tauri-app-updater.key");
+/**
+ * Demo key pair committed to the repo on purpose, for test/demo use only: anyone with the
+ * repository can sign updates that this app accepts. The `.test` suffix keeps the `*.key`
+ * ignore rule in force for any other key.
+ */
+const REPO_KEY = path.join(ROOT, ".tauri", "tauri-app-updater.key.test");
+const REPO_KEY_PUB = path.join(ROOT, ".tauri", "tauri-app-updater.key.pub.test");
+const REPO_KEY_PASS = path.join(ROOT, ".tauri", "tauri-app-updater.key.pass");
 /** Must match the endpoint in src-tauri/tauri.local.conf.json. */
 const PORT = 8787;
 const PUBKEY_PLACEHOLDER = "REPLACE_ME";
@@ -243,20 +251,36 @@ function cmdSetRepo({ positional }) {
   note(`${endpoint}\n    written to ${rel(CONF_PATH)}`);
 }
 
-/** Environment for `tauri build`, falling back to the default key file. */
+/** Public key file that belongs to a private key file. */
+const pubFileFor = (keyFile) => (keyFile === REPO_KEY ? REPO_KEY_PUB : `${keyFile}.pub`);
+
+/**
+ * Environment for `tauri build`. Without TAURI_SIGNING_PRIVATE_KEY it uses
+ * ~/.tauri/tauri-app-updater.key or the demo key in .tauri/, preferring the one whose
+ * public key is the one configured in tauri.conf.json.
+ */
 function signingEnv() {
   const env = { ...process.env };
   if (!env.TAURI_SIGNING_PRIVATE_KEY) {
-    if (!fs.existsSync(DEFAULT_KEY)) {
-      die(`No signing key. Run \`npm run keys\` first, or export TAURI_SIGNING_PRIVATE_KEY.`);
-    }
-    env.TAURI_SIGNING_PRIVATE_KEY = DEFAULT_KEY;
-    note(dim(`TAURI_SIGNING_PRIVATE_KEY not set; using ${DEFAULT_KEY}`));
+    const configured = readConf().plugins?.updater?.pubkey;
+    const keys = [DEFAULT_KEY, REPO_KEY].filter((key) => fs.existsSync(key));
+    const matching = keys.find(
+      (key) => fs.existsSync(pubFileFor(key)) && fs.readFileSync(pubFileFor(key), "utf8").trim() === configured,
+    );
+    const key = matching ?? keys[0];
+    if (!key) die(`No signing key. Run \`npm run keys\` first, or export TAURI_SIGNING_PRIVATE_KEY.`);
+    env.TAURI_SIGNING_PRIVATE_KEY = key;
+    note(dim(`TAURI_SIGNING_PRIVATE_KEY not set; using ${rel(key)}`));
   }
   if (env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD === undefined) {
-    // `tauri signer sign` was observed to assume an empty password here (no prompt) and to
-    // fail with "incorrect updater private key password" when the key has one.
-    note(dim("TAURI_SIGNING_PRIVATE_KEY_PASSWORD not set; assuming the key has no password"));
+    if (env.TAURI_SIGNING_PRIVATE_KEY === REPO_KEY && fs.existsSync(REPO_KEY_PASS)) {
+      env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = fs.readFileSync(REPO_KEY_PASS, "utf8").replace(/\r?\n$/, "");
+      note(dim(`TAURI_SIGNING_PRIVATE_KEY_PASSWORD not set; using ${rel(REPO_KEY_PASS)}`));
+    } else {
+      // `tauri signer sign` was observed to assume an empty password here (no prompt) and to
+      // fail with "incorrect updater private key password" when the key has one.
+      note(dim("TAURI_SIGNING_PRIVATE_KEY_PASSWORD not set; assuming the key has no password"));
+    }
   }
   return env;
 }
@@ -268,7 +292,7 @@ function checkPubkey(env) {
     die(`plugins.updater.pubkey in ${rel(CONF_PATH)} is not set. Run \`npm run keys\` first.`);
   }
   const keyFile = env.TAURI_SIGNING_PRIVATE_KEY;
-  const pubFile = keyFile && fs.existsSync(`${keyFile}.pub`) ? `${keyFile}.pub` : undefined;
+  const pubFile = keyFile && fs.existsSync(pubFileFor(keyFile)) ? pubFileFor(keyFile) : undefined;
   if (pubFile && fs.readFileSync(pubFile, "utf8").trim() !== pubkey) {
     die(
       `the public key in ${rel(CONF_PATH)} does not belong to ${keyFile}.\n` +

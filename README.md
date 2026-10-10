@@ -73,9 +73,32 @@ export TAURI_SIGNING_PRIVATE_KEY=~/.tauri/tauri-app-updater.key   # a path or th
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='your-password'          # leave unset if no password
 ```
 
-The `local:*` scripts fall back to `~/.tauri/tauri-app-updater.key` when
-`TAURI_SIGNING_PRIVATE_KEY` is not set. Always export the password before building; don't count
-on a prompt.
+The `local:*` scripts fall back to `~/.tauri/tauri-app-updater.key`, or to the demo key below,
+when `TAURI_SIGNING_PRIVATE_KEY` is not set. For your own key, always export the password before
+building; don't count on a prompt.
+
+### Demo key pair committed to this repository
+
+For test/demo use, the key pair whose public key is in `tauri.conf.json` is committed under
+`.tauri/`:
+
+| File | Contents |
+|---|---|
+| `.tauri/tauri-app-updater.key.test` | Private key (password-protected) |
+| `.tauri/tauri-app-updater.key.pub.test` | Public key (same as `plugins.updater.pubkey`) |
+| `.tauri/tauri-app-updater.key.pass` | The private key's password |
+
+When no key is exported, the `local:*` scripts use these files, including the password, so
+`npm run local:e2e` works right after cloning.
+
+> [!WARNING]
+> With the private key and its password public, **anyone can sign an update that this app
+> accepts**. All that still protects installed copies is who can publish a release in the
+> repository, plus HTTPS. That is acceptable for a demo only. For a real app, run
+> `npm run keys -- --force` to make a new private key, delete `.tauri/`, update the
+> `TAURI_SIGNING_PRIVATE_KEY*` Actions secrets, and ship a release signed with the old key that
+> carries the new public key. The `.test` suffix keeps the `*.key` ignore rule working for every
+> other key.
 
 ## 2. Verify locally
 
@@ -110,7 +133,16 @@ Options: `npm run local:e2e -- --from 0.1.0 --to 0.2.0 --timeout 180`. At the en
 prints the app's own log, which lives at
 `~/Library/Logs/com.lifuzu.tauri-app-updater/updater-demo.log`.
 
+The e2e runs its update server only while the test is going. Afterwards the bundle in
+`src-tauri/target/release/bundle/macos/` is the **new** version, and nothing answers on port
+8787. Opening that bundle and clicking Check fails with `error sending request`, and even with
+`npm run local:serve` running it reports "latest version". To click through an update yourself,
+use the manual steps below.
+
 ### Manual test (any desktop OS, through the UI)
+
+For a step-by-step checklist with the expected result of every step, see
+[VERIFICATION.md](VERIFICATION.md).
 
 ```sh
 # Build the "old" version and install it somewhere the updater can replace it
@@ -223,6 +255,21 @@ curl -sL https://github.com/<owner>/<repo>/releases/latest/download/latest.json 
 > [Developer ID signing and notarization](https://v2.tauri.app/distribute/sign/macos/). Windows
 > SmartScreen warns about unsigned installers in the same way.
 
+## Things to know
+
+- **Don't install from `tauri dev`.** In that mode the updater would replace the whole
+  `src-tauri/target/debug/` folder, because it works out the install location from the
+  executable's path. The app detects this and disables Download and Install there; checking
+  still works.
+- **Signed versions are enforced.** `tauri add updater` turned on `requireSignedVersion`, and I
+  left it on. An update is rejected unless its signature records the same version
+  `latest.json` announces. If you ever sign by hand with `tauri signer sign`, pass
+  `--app-version`.
+- **macOS will block the first download.** The app is ad-hoc signed only, so after downloading
+  from the release page you need
+  `xattr -dr com.apple.quarantine "/Applications/Tauri Updater Demo.app"`. Updates installed by
+  the updater don't have this problem.
+
 ## How it works
 
 ```mermaid
@@ -280,6 +327,7 @@ file. Keys can be `{os}-{arch}` or the more specific `{os}-{arch}-{installer}`:
 | Build: `failed to read plugin permissions: ... No such file or directory`, naming an old path | The project was moved or copied along with `src-tauri/target`. Cargo caches absolute paths in it, so run `(cd src-tauri && cargo clean)` once. The `local:*` scripts detect this. |
 | Build: `The updater secret key from TAURI_SIGNING_PRIVATE_KEY does not match the public key` | `pubkey` in `tauri.conf.json` belongs to another key. Run `npm run keys` to sync it (the `local:*` scripts check this before building). |
 | App: `The signature verification failed` | The release was signed with a key that doesn't match the `pubkey` inside the installed app. Copies installed with the old key can't be fixed, so reinstall them. |
+| App: `error sending request for url (http://localhost:8787/...)` | Nothing is listening on port 8787. Builds made by `local:build` or `local:e2e` check the local server, and the e2e stops its server when it finishes. Start it with `npm run local:serve`. |
 | App: `Could not fetch a valid release JSON from the remote` | The endpoint is unreachable or doesn't return JSON. On GitHub: nothing published yet, the release is still a draft, or the repo is private. |
 | App: check finds nothing although you released | The release version isn't higher than the installed one, or it is still a draft or pre-release |
 | App: `the platform ... was not found in the response platforms object` | `latest.json` has no entry for your `{os}-{arch}`, for example because that matrix job failed |

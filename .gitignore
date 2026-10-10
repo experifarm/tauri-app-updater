@@ -15,7 +15,9 @@ dist-ssr
 # Local update server, installed test copies and e2e runs (scripts/demo.mjs)
 .local/
 
-# Never commit updater signing keys (they belong in ~/.tauri and CI secrets)
+# Updater signing keys belong in ~/.tauri and CI secrets. The exception is the demo key
+# pair in .tauri/ (*.key.test, *.key.pub.test, *.key.pass), committed on purpose for
+# test/demo use only.
 *.key
 *.key.pub
 

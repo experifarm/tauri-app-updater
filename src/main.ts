@@ -188,7 +188,16 @@ async function checkForUpdate(): Promise<Update | null> {
     log(`Update available: ${update.currentVersion} -> ${update.version}`, "ok");
     return update;
   } catch (err) {
-    fail("Check failed", err);
+    // reqwest reports "error sending request for url (...)" without the underlying cause
+    // (usually "connection refused"), so say what it most likely means.
+    const unreachable = errorMessage(err).includes("error sending request");
+    const local = info?.endpoints.some((endpoint) => endpoint.includes("localhost"));
+    const hint = !unreachable
+      ? ""
+      : local
+        ? " (could not connect: is the local update server running? Start it with `npm run local:serve`)"
+        : " (could not connect to the update endpoint)";
+    fail("Check failed", `${errorMessage(err)}${hint}`);
     return null;
   }
 }
