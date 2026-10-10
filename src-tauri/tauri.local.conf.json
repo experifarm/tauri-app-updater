@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://localhost:8787/latest.json?current_version={{current_version}}&target={{target}}&arch={{arch}}"
+      ],
+      "dangerousInsecureTransportProtocol": true
+    }
+  }
+}

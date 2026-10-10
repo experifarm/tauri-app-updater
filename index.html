@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>Tauri Updater Demo</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <header class="hero">
+        <div class="hero-label">Running version</div>
+        <div class="hero-version" id="version">…</div>
+        <div class="hero-name" id="product-name"></div>
+      </header>
+
+      <div class="banner warn" id="install-warning" hidden>
+        This binary is not running from an installed bundle (for example under
+        <code>tauri dev</code>). Checking works, but download and install are
+        disabled: the updater would replace the folder that contains the
+        executable. Build a bundle to test the full flow.
+      </div>
+
+      <div class="banner info" id="auto-banner" hidden>
+        Started with <code>--auto-update</code>: the app checks, downloads,
+        installs and relaunches on its own.
+      </div>
+
+      <section class="card">
+        <h2>Update</h2>
+        <div class="status" id="status" data-tone="muted">Idle</div>
+
+        <div class="steps">
+          <button id="btn-check" type="button">1. Check</button>
+          <button id="btn-download" type="button" disabled>2. Download</button>
+          <button id="btn-install" type="button" disabled>3. Install</button>
+          <button id="btn-restart" type="button" disabled>4. Restart</button>
+        </div>
+
+        <div class="progress" id="progress" hidden>
+          <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+          <div class="progress-label" id="progress-label"></div>
+        </div>
+
+        <div class="update-details" id="update-details" hidden>
+          <div class="update-head">
+            <span>Available:</span>
+            <strong id="new-version"></strong>
+            <span class="muted" id="new-date"></span>
+          </div>
+          <pre class="notes" id="notes"></pre>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Build</h2>
+        <dl class="facts">
+          <dt>Updater target</dt>
+          <dd id="fact-target">…</dd>
+          <dt>Bundle type</dt>
+          <dd id="fact-bundle">…</dd>
+          <dt>Build profile</dt>
+          <dd id="fact-profile">…</dd>
+          <dt>Endpoint(s)</dt>
+          <dd id="fact-endpoints">…</dd>
+          <dt>Log file</dt>
+          <dd id="fact-log">…</dd>
+        </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Log</h2>
+          <button id="btn-clear" type="button" class="link">Clear</button>
+        </div>
+        <ol class="log" id="log"></ol>
+      </section>
+    </main>
+  </body>
+</html>

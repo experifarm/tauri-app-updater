@@ -1,0 +1,145 @@
+# Builds, signs and publishes a release whenever a version tag is pushed:
+#
+#   npm run set-version -- 0.2.0
+#   git commit -am "Release v0.2.0" && git tag v0.2.0 && git push origin HEAD v0.2.0
+#
+# 1. create-release  checks the tag matches tauri.conf.json and creates a *draft* release
+# 2. build           builds every platform, uploads installers + updater bundles + .sig files,
+#                    and merges each platform into the release's latest.json (tauri-action)
+# 3. publish         un-drafts the release once every platform succeeded, so
+#                    https://github.com/<owner>/<repo>/releases/latest/download/latest.json
+#                    switches to the new version for all platforms at once.
+#
+# Required repository secrets (see README.md):
+#   TAURI_SIGNING_PRIVATE_KEY           contents of ~/.tauri/tauri-app-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (omit if the key has none)
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag, version, public key and signing secret
+        env:
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          PUBKEY=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $VERSION in src-tauri/tauri.conf.json (run: npm run set-version -- ${GITHUB_REF_NAME#v})"
+            exit 1
+          fi
+          case "$PUBKEY" in REPLACE_ME*|"")
+            echo "::error::plugins.updater.pubkey is not set in src-tauri/tauri.conf.json (run: npm run keys)"
+            exit 1;;
+          esac
+          if [ "$HAS_SIGNING_KEY" != "true" ]; then
+            echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is missing (gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/tauri-app-updater.key)"
+            exit 1
+          fi
+
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const tag = process.env.GITHUB_REF_NAME;
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Tauri Updater Demo ${tag}`,
+              body: `Download the installer for your platform below. Installed copies update themselves from latest.json.`,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  build:
+    needs: create-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest # Intel
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          # Shown as the release notes inside the app (the `notes` field of latest.json).
+          releaseBody: "Release ${{ github.ref_name }}: built and signed by GitHub Actions."
+          # Use the NSIS setup.exe (not the MSI) as the Windows update in latest.json.
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        uses: actions/github-script@v9
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+              make_latest: "true",
+            });
