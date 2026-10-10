@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app-updater"
-version = "0.1.0"
+version = "0.2.0"
 description = "Demo app for verifying the Tauri v2 updater plugin"
 authors = ["you"]
 edition = "2024"
